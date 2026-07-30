@@ -10,12 +10,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
-class CouponIssueServiceTest extends MySqlTestBase {
+@ActiveProfiles("naive")
+class NaiveCouponIssuerTest extends MySqlTestBase {
 
 	@Autowired
-	private CouponIssueService couponIssueService;
+	private CouponIssuer couponIssuer;
 
 	@Autowired
 	private CouponRepository couponRepository;
@@ -33,7 +35,7 @@ class CouponIssueServiceTest extends MySqlTestBase {
 	void 재고가_남아있으면_발급한다() {
 		Coupon coupon = couponRepository.save(new Coupon("선착순 2장", 2));
 
-		boolean issued = couponIssueService.issue(coupon.getId(), 1L);
+		boolean issued = couponIssuer.issue(coupon.getId(), 1L);
 
 		assertThat(issued).isTrue();
 		assertThat(couponIssueRepository.countByCouponId(coupon.getId())).isEqualTo(1);
@@ -42,10 +44,10 @@ class CouponIssueServiceTest extends MySqlTestBase {
 	@Test
 	void 재고가_소진되면_발급하지_않는다() {
 		Coupon coupon = couponRepository.save(new Coupon("선착순 2장", 2));
-		couponIssueService.issue(coupon.getId(), 1L);
-		couponIssueService.issue(coupon.getId(), 2L);
+		couponIssuer.issue(coupon.getId(), 1L);
+		couponIssuer.issue(coupon.getId(), 2L);
 
-		boolean issued = couponIssueService.issue(coupon.getId(), 3L);
+		boolean issued = couponIssuer.issue(coupon.getId(), 3L);
 
 		assertThat(issued).isFalse();
 		assertThat(couponIssueRepository.countByCouponId(coupon.getId())).isEqualTo(2);

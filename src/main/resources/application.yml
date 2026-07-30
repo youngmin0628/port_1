@@ -1,6 +1,9 @@
 spring:
   application:
     name: coupon
+  profiles:
+    # 발급 전략 전환용. 측정용 스위치를 API 계약에 노출시키지 않으려고 프로파일로 둔다.
+    active: ${ISSUE_STRATEGY:naive}
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/coupon}
     username: ${DB_USERNAME:coupon}

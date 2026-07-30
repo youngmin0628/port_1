@@ -10,16 +10,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class CouponIssueController {
 
-	private final CouponIssueService couponIssueService;
+	private final CouponIssuer couponIssuer;
 
-	public CouponIssueController(CouponIssueService couponIssueService) {
-		this.couponIssueService = couponIssueService;
+	public CouponIssueController(CouponIssuer couponIssuer) {
+		this.couponIssuer = couponIssuer;
 	}
 
 	@PostMapping("/coupons/{couponId}/issues")
 	public ResponseEntity<Void> issue(@PathVariable Long couponId, @RequestBody CouponIssueRequest request) {
 		// k6가 발급과 품절을 상태코드로 구분해야 한다. 둘 다 200이면 실제 발급률을 알 수 없다.
-		if (couponIssueService.issue(couponId, request.userId())) {
+		if (couponIssuer.issue(couponId, request.userId())) {
 			return ResponseEntity.ok().build();
 		}
 		return ResponseEntity.status(HttpStatus.CONFLICT).build();

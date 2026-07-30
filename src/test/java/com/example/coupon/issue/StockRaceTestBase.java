@@ -14,19 +14,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-abstract class CouponIssueConcurrencyTestBase extends MySqlTestBase {
+abstract class StockRaceTestBase extends MySqlTestBase {
 
-	private static final int TOTAL_QUANTITY = 100;
+	protected static final int TOTAL_QUANTITY = 100;
 	private static final int THREAD_COUNT = 1000;
 
 	@Autowired
-	private CouponIssueService couponIssueService;
+	private CouponIssuer couponIssuer;
 
 	@Autowired
-	private CouponRepository couponRepository;
+	protected CouponRepository couponRepository;
 
 	@Autowired
-	private CouponIssueRepository couponIssueRepository;
+	protected CouponIssueRepository couponIssueRepository;
 
 	@BeforeEach
 	void 초기화() {
@@ -36,6 +36,10 @@ abstract class CouponIssueConcurrencyTestBase extends MySqlTestBase {
 
 	@Test
 	void 동시에_1000명이_요청해도_100장만_발급된다() throws InterruptedException {
+		assertThat(재고_경합을_실행한다()).isEqualTo(TOTAL_QUANTITY);
+	}
+
+	protected long 재고_경합을_실행한다() throws InterruptedException {
 		Coupon coupon = couponRepository.save(new Coupon("선착순 100장", TOTAL_QUANTITY));
 		AtomicInteger exceptions = new AtomicInteger();
 
@@ -48,7 +52,7 @@ abstract class CouponIssueConcurrencyTestBase extends MySqlTestBase {
 			long userId = i;
 			executor.submit(() -> {
 				try {
-					couponIssueService.issue(coupon.getId(), userId);
+					couponIssuer.issue(coupon.getId(), userId);
 				} catch (Exception e) {
 					// 예외를 세지 않고 삼키면 DB 오류를 오버셀로 착각한다.
 					exceptions.incrementAndGet();
@@ -65,6 +69,6 @@ abstract class CouponIssueConcurrencyTestBase extends MySqlTestBase {
 		System.out.printf("[%s] 발급=%d, 초과=%d, 예외=%d%n",
 				getClass().getSimpleName(), issued, issued - TOTAL_QUANTITY, exceptions.get());
 
-		assertThat(issued).isEqualTo(TOTAL_QUANTITY);
+		return issued;
 	}
 }
