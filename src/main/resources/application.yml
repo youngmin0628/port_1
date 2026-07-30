@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: coupon
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/coupon}
+    username: ${DB_USERNAME:coupon}
+    password: ${DB_PASSWORD:coupon}
+    hikari:
+      # 벤치마크를 지배하는 값이다. 기본값에 맡기면 나중에 수치의 출처를 설명할 수 없다.
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  jpa:
+    hibernate:
+      # update로 두면 스키마가 실행 이력에 따라 달라져 벤치마크 재현성이 깨진다.
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
