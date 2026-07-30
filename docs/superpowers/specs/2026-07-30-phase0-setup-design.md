@@ -18,11 +18,11 @@ Phase 0의 산출물은 **"Phase 1에서 오버셀을 재현할 수 있는 최�
 - Gradle 단일 모듈 Spring Boot 프로젝트 (3.5 계열 최신 패치, Java 21 toolchain)
 - 도메인 엔티티 2개: `Coupon`, `CouponIssue`
 - Flyway 마이그레이션 `V1__init.sql`
-- `docker-compose.yml` — PostgreSQL / Redis / Kafka (Redis·Kafka는 profile로 분리)
+- `docker-compose.yml` — MySQL / Redis / Kafka (Redis·Kafka는 profile로 분리)
 - Actuator 헬스체크 엔드포인트
 - Testcontainers 기반 컨텍스트 로드 테스트
 - `docs/progress.md`, `docs/benchmark.md` 초기화
-- git 저장소 초기화 및 최초 커밋
+- git 저장소 초기화, `origin` 등록, 최초 push
 
 ### 하지 않는 것 (그리고 이유)
 
@@ -40,7 +40,7 @@ Phase 0의 산출물은 **"Phase 1에서 오버셀을 재현할 수 있는 최�
 
 ### 3.1 앱은 로컬 실행, 인프라만 컨테이너
 
-`docker compose`는 PostgreSQL만 띄우고 앱은 `./gradlew bootRun`으로 로컬에서 돈다.
+`docker compose`는 MySQL만 띄우고 앱은 `./gradlew bootRun`으로 로컬에서 돈다.
 
 Phase 1~4는 코드를 고치고 부하를 걸고 수치를 보는 루프를 수십 번 반복한다.
 앱을 컨테이너에 넣으면 그 루프마다 이미지 재빌드가 끼어든다.
@@ -48,20 +48,37 @@ Phase 1~4는 코드를 고치고 부하를 걸고 수치를 보는 루프를 수
 
 Dockerfile은 k8s가 실제로 필요해지는 시점에 추가한다.
 
-### 3.2 PostgreSQL 17
+### 3.2 MySQL 8.4 (LTS)
 
-MySQL이어야 할 이유가 없고, 이 프로젝트 목적에는 PostgreSQL이 유리한 점이 있다.
-Phase 2에서 락 경쟁이 실제로 어디서 발생하는지 관찰할 때
-`pg_locks` / `pg_stat_activity.wait_event`가 MySQL `performance_schema.data_locks`보다
-다루기 쉽다.
+PostgreSQL을 한 번 검토했다가 MySQL로 되돌렸다.
+로컬 비용 차이는 디스크 약 300MB, 램 약 300MB 수준인데
+로컬은 디스크 여유 191GB / 램 16GB다. 무의미한 차이다.
 
-이 선택으로 생기는 차이:
+반대로 학습거리 차이는 크다. 이 프로젝트는 학습·포트폴리오 목적이므로 그쪽을 택한다.
 
-- **기본 격리 수준이 READ COMMITTED** (MySQL은 REPEATABLE READ).
-  Phase 1 오버셀은 양쪽 모두 재현되며, read-modify-write 설명이 더 직관적이다.
-- **Phase 2에서 `lock_timeout`을 명시해야 한다.** PostgreSQL 기본값은 무한 대기(`0`)라
-  1000 스레드 비관적 락 테스트가 응답 없이 멈춘다. Phase 2 진입 시 처리한다.
-- **포기하는 것**: MySQL InnoDB gap lock 데드락. Phase 2 학습거리로 흥미로웠지만 필수는 아니다.
+**MySQL을 택해서 얻는 것:**
+
+- **gap lock / next-key lock.** InnoDB는 기본 격리 수준 REPEATABLE READ에서
+  인덱스 레코드뿐 아니라 레코드 사이의 간격까지 잠근다.
+  Phase 2에서 비관적 락을 제대로 걸었는데도 예상 못 한 데드락이 발생할 수 있고,
+  그 원인을 `SHOW ENGINE INNODB STATUS`의 `LATEST DETECTED DEADLOCK` 섹션에서
+  직접 읽어내는 것이 이 프로젝트에서 가장 값진 학습 대목이 된다.
+  PostgreSQL에는 gap lock이 없어 이 함정 자체가 존재하지 않는다.
+- **기본 격리 수준이 REPEATABLE READ.** Phase 1 오버셀을 설명할 때
+  consistent read snapshot 때문에 `count()`가 무엇을 보는지까지 따져야 한다.
+  설명할 것이 더 많다는 뜻이고, 그게 이 프로젝트에는 이득이다.
+- **국내 실무 빈도.** 포트폴리오를 읽는 사람에게 익숙한 스택이다.
+
+**대가:**
+
+- 락 관찰이 PostgreSQL의 `pg_locks`보다 번거롭다.
+  `performance_schema.data_locks`, `performance_schema.data_lock_waits`,
+  `information_schema.innodb_trx`, `sys.innodb_lock_waits`를 쓴다.
+  번거롭긴 하지만 이것도 익힐 값이 있는 도구다.
+- `innodb_lock_wait_timeout` 기본값이 50초다. Phase 2에서 1000 스레드가 대기에 걸리면
+  테스트가 오래 끌린다. Phase 2 진입 시 이 값을 낮춰 측정하고 조건에 기록한다.
+  (참고로 PostgreSQL은 `lock_timeout` 기본값이 무한이라 아예 멈춘다.
+  MySQL 쪽이 이 점에서는 안전하다.)
 
 ### 3.3 Java 21 — Gradle toolchain으로 확보
 
@@ -103,14 +120,26 @@ Phase 1의 `countByCouponId()`가 풀스캔이 되면
 측정 대상이 "동시성 병목"이 아니라 "인덱스 없음"이 된다.
 Phase 1이 재현해야 하는 실패는 read-modify-write race이지 느린 쿼리가 아니다.
 
+부수 효과로, 이 인덱스가 Phase 2 gap lock의 잠금 범위를 결정한다.
+인덱스 유무가 락 범위를 바꾼다는 것 자체가 Phase 2의 관찰 대상이 된다.
+
 ### 3.8 ID 생성 전략은 `IDENTITY` (나이브 선택)
 
-PostgreSQL에서 `GenerationType.IDENTITY`는 Hibernate의 JDBC batch insert를 무력화한다.
+`GenerationType.IDENTITY`(MySQL AUTO_INCREMENT)는 Hibernate의 JDBC batch insert를
+무력화한다. insert 직후 생성된 키를 받아와야 하므로 배치로 묶을 수 없다.
+
 그럼에도 Phase 0에서는 IDENTITY로 간다 — 가장 단순하고, 이 프로젝트는
 나이브한 선택의 대가를 측정으로 드러내는 것이 목적이다.
 
-**Phase 4 후보로 기록**: 컨슈머 배치 삽입이 병목으로 측정되면 pooled 시퀀스로 전환하고
-before/after를 `docs/benchmark.md`에 남긴다. 지금 미리 바꾸지 않는다.
+**Phase 4 후보로 기록.** MySQL에는 시퀀스가 없어 PostgreSQL처럼 pooled 시퀀스로
+갈아탈 수 없다. 컨슈머의 배치 삽입이 병목으로 측정되면 선택지는 셋이다.
+
+1. 애플리케이션이 ID를 직접 할당(TSID 등) + `rewriteBatchedStatements=true`
+2. `TABLE` generator — 그 자체가 경쟁 지점이라 이 프로젝트 취지에 맞지 않는다
+3. IDENTITY를 유지하고 배치를 포기
+
+Phase 4에서 측정한 뒤 판단하고 before/after를 `docs/benchmark.md`에 남긴다.
+지금 미리 바꾸지 않는다.
 
 ### 3.9 HikariCP 풀 크기를 10으로 명시
 
@@ -118,18 +147,77 @@ before/after를 `docs/benchmark.md`에 남긴다. 지금 미리 바꾸지 않는
 기본값에 맡기면 나중에 수치의 출처를 설명할 수 없다.
 `DB_POOL_SIZE` 환경변수로 조절 가능하게 하되 기본값 10을 벤치마크 조건에 기록한다.
 
-PostgreSQL은 커넥션당 프로세스를 쓰므로 MySQL보다 커넥션 비용이 크다.
-이 값이 Phase 1~2에서 더 뚜렷한 영향을 낼 가능성이 있다.
+### 3.10 MySQL 기본 설정을 건드리지 않는다
 
-### 3.10 Redis / Kafka는 compose에 정의하되 profile로 분리
+`innodb_flush_log_at_trx_commit`은 기본값 1(커밋마다 fsync)을 유지한다.
+2로 바꾸면 TPS가 크게 오르지만 그건 개선이 아니라 내구성을 팔아 얻은 수치다.
+`innodb_buffer_pool_size`도 기본값 128MB를 유지한다 — 이 규모의 테이블에는 충분하다.
 
-`docker compose up -d` 기본 기동은 PostgreSQL만.
+두 값 모두 `docs/benchmark.md`의 측정 조건에 기록해서
+나중에 누가 이 수치를 보더라도 무엇을 전제한 수치인지 알 수 있게 한다.
+
+### 3.11 Redis / Kafka는 compose에 정의하되 profile로 분리
+
+`docker compose up -d` 기본 기동은 MySQL만.
 Redis는 `--profile redis`, Kafka는 `--profile kafka`로 해당 Phase에서 켠다.
 
 Phase 1~2 벤치마크가 유휴 Kafka 브로커와 CPU/메모리를 나눠 쓰지 않게 하려는 것이다.
 Kafka(KRaft) 단일 노드만으로도 로컬에서 1GB 안팎을 잡는다.
 
-## 4. 파일 구조
+## 4. 코드 / 주석 / 문서 컨벤션
+
+이 프로젝트는 사람이 읽고 평가하는 포트폴리오다.
+기계가 생성한 티가 나는 코드는 그 자체로 감점 요소다. 아래를 지킨다.
+
+### 4.1 주석
+
+**주석은 "왜"만 쓴다.** 코드가 무엇을 하는지 한국어로 번역하는 주석은 쓰지 않는다.
+
+```java
+// 쓰지 않는다 — 코드가 이미 말하고 있다
+// 쿠폰 발급 수를 조회한다
+long issued = couponIssueRepository.countByCouponId(couponId);
+```
+
+**이 프로젝트에서 주석이 정당한 경우는 셋뿐이다.**
+
+1. 의도적으로 취약하거나 비효율적으로 만든 코드 — Phase 1의 무락 구현이 대표적이다
+2. 트레이드오프가 있는 선택의 이유 — 왜 이 방식을 골랐는지가 코드로는 안 보일 때
+3. 직관에 반하는 동작 — 격리 수준, 락 범위, 배치 무력화처럼 몰랐으면 당한다는 것들
+
+그 밖의 경우에 주석을 달고 싶어지면 주석 대신 이름을 고친다.
+
+### 4.2 금지
+
+- 형식적 Javadoc. 게터, 생성자, 엔티티, 컨트롤러 메서드에 붙이지 않는다.
+  공개 API 중 계약이 자명하지 않은 것에만 쓴다.
+- 섹션 구분 주석(`// ===== 필드 =====`)과 장식용 구분선
+- 이모지, 체크마크, 화살표 같은 장식 문자
+- `// TODO`, `// FIXME`. 남길 것이 있으면 `docs/known-issues.md`에 문장으로 쓴다
+- 발생 불가능한 시나리오의 null 체크와 try-catch (CLAUDE.md 4번)
+
+### 4.3 이름
+
+도메인 용어로 짧게 쓴다. `couponIssueRequestDtoList` 대신 `requests`.
+`DTO` 접미사는 실제로 계층 경계를 넘는 타입에만 붙인다.
+축약하지 말라는 뜻이 아니라, 타입이 이미 말하는 것을 이름에 반복하지 말라는 뜻이다.
+
+### 4.4 커밋 메시지
+
+한국어로 쓴다. 제목은 무엇을 했는지 한 줄.
+본문은 그 이유가 코드나 제목에서 자명하지 않을 때만 쓰고, 불릿을 기계적으로 나열하지 않는다.
+
+`Co-Authored-By: Claude` 트레일러는 유지한다.
+도구를 썼다는 사실을 이력에서 지우는 것과 코드가 사람 손을 거친 것처럼 보이게 하는 것은
+다른 문제다. 앞의 것은 하지 않는다.
+
+### 4.5 문서
+
+`docs/*.md`는 수치와 관찰 사실 중심으로 쓴다.
+"혁신적", "완벽한", "강력한" 같은 과장 표현을 쓰지 않는다.
+실패한 시도와 해결하지 못한 것도 그대로 남긴다 — 그게 이 프로젝트에서 가장 읽을 가치가 있는 부분이다.
+
+## 5. 파일 구조
 
 ```
 portfolioPjt/
@@ -141,7 +229,7 @@ portfolioPjt/
 ├── CLAUDE.md, PROMPTS.md            (기존)
 ├── docs/
 │   ├── progress.md                  (신규)
-│   ├── benchmark.md                 (신규, 표 헤더만)
+│   ├── benchmark.md                 (신규, 표 헤더와 측정 조건 양식만)
 │   └── superpowers/specs/           (이 문서)
 └── src/
     ├── main/java/com/example/coupon/
@@ -158,9 +246,9 @@ portfolioPjt/
 
 리포지토리 패키지는 만들지 않는다. Phase 1에서 `countByCouponId()`가 필요해질 때 추가한다.
 
-## 5. 상세 설계
+## 6. 상세 설계
 
-### 5.1 의존성
+### 6.1 의존성
 
 | 스코프 | 아티팩트 |
 |---|---|
@@ -168,19 +256,19 @@ portfolioPjt/
 | implementation | `spring-boot-starter-data-jpa` |
 | implementation | `spring-boot-starter-actuator` |
 | implementation | `flyway-core` |
-| runtimeOnly | `flyway-database-postgresql` |
-| runtimeOnly | `org.postgresql:postgresql` |
+| runtimeOnly | `flyway-mysql` |
+| runtimeOnly | `com.mysql:mysql-connector-j` |
 | testImplementation | `spring-boot-starter-test` |
 | testImplementation | `spring-boot-testcontainers` |
 | testImplementation | `org.testcontainers:junit-jupiter` |
-| testImplementation | `org.testcontainers:postgresql` |
+| testImplementation | `org.testcontainers:mysql` |
 
-Flyway 10 이상은 DB별 모듈이 분리되어 `flyway-database-postgresql`이 필요하다.
+Flyway 10 이상은 DB별 모듈이 분리되어 `flyway-mysql`이 필요하다.
 버전은 Spring Boot BOM이 관리한다. 구현 시 실제 아티팩트명을 확인한다.
 
 Redis / Kafka 관련 의존성은 하나도 넣지 않는다.
 
-### 5.2 엔티티
+### 6.2 엔티티
 
 **`Coupon`**
 
@@ -206,37 +294,37 @@ getter와 생성자/정적 팩터리는 넣지 않는다 — Phase 0에는 엔�
 하나도 없다. `ddl-auto: validate`는 매핑만 검사하므로 이것으로 충분하고,
 소비 코드가 생기는 Phase 1에서 필요한 만큼만 추가한다.
 
-### 5.3 `V1__init.sql`
+### 6.3 `V1__init.sql`
 
 ```sql
 create table coupon (
-    id             bigint generated by default as identity primary key,
+    id             bigint       not null auto_increment,
     name           varchar(100) not null,
-    total_quantity int          not null
-);
+    total_quantity int          not null,
+    primary key (id)
+) engine = innodb;
 
 create table coupon_issue (
-    id        bigint generated by default as identity primary key,
-    coupon_id bigint    not null,
-    user_id   bigint    not null,
-    issued_at timestamp not null
-);
-
-create index idx_coupon_issue_coupon_id on coupon_issue (coupon_id);
+    id        bigint      not null auto_increment,
+    coupon_id bigint      not null,
+    user_id   bigint      not null,
+    issued_at datetime(6) not null,
+    primary key (id),
+    key idx_coupon_issue_coupon_id (coupon_id)
+) engine = innodb;
 ```
 
-`generated by default as identity`를 쓴다 — Hibernate `IDENTITY` 전략과 맞는다.
-`issued_at`은 `timestamp`(timezone 없음)로 `LocalDateTime`에 대응시킨다.
-`(coupon_id, user_id)` unique 제약은 **넣지 않는다.**
+`datetime(6)`은 Hibernate의 `LocalDateTime` 기본 매핑과 맞춘 것이다.
+`(coupon_id, user_id)` unique 제약은 **넣지 않는다** — Phase 2(c)의 재료다.
 
-### 5.4 `application.yml`
+### 6.4 `application.yml`
 
 ```yaml
 spring:
   application:
     name: coupon
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/coupon}
+    url: ${DB_URL:jdbc:mysql://localhost:3306/coupon}
     username: ${DB_USERNAME:coupon}
     password: ${DB_PASSWORD:coupon}
     hikari:
@@ -259,30 +347,44 @@ management:
 ```
 
 접속 정보는 전부 환경변수로 외부화한다 — 나중에 컨테이너/k8s로 옮길 때 코드 변경이 없다.
+JDBC URL에 **성능 튜닝 파라미터를 붙이지 않는다.** 드라이버 기본값에서 출발한다.
+(9절의 `allowPublicKeyRetrieval`은 튜닝이 아니라 접속 자체를 위한 것이므로 예외다.)
+
 Actuator는 `health`만 노출한다. `show-details: always`는 로컬 개발용이며
 Phase 0 검증에서 `db` 컴포넌트 상태를 직접 확인하는 데 쓴다.
 
-### 5.5 `docker-compose.yml`
+### 6.5 `docker-compose.yml`
 
 | 서비스 | 이미지 | profile | 포트 | 비고 |
 |---|---|---|---|---|
-| `postgres` | `postgres:17-alpine` | (기본) | 5432 | `pg_isready` 헬스체크, named volume |
+| `mysql` | `mysql:8.4` | (기본) | 3306 | `mysqladmin ping` 헬스체크, named volume |
 | `redis` | `redis:7.4-alpine` | `redis` | 6379 | Phase 3에서 기동 |
 | `kafka` | `apache/kafka:3.9.0` | `kafka` | 9092 | KRaft 단일 노드(broker+controller 결합) |
 
-PostgreSQL 자격증명은 `coupon` / `coupon` / DB `coupon`.
-데이터는 named volume `postgres-data`에 두고, 초기화는 `docker compose down -v`로 한다.
+MySQL은 `MYSQL_DATABASE=coupon`, `MYSQL_USER=coupon`, `MYSQL_PASSWORD=coupon`,
+`MYSQL_ROOT_PASSWORD=root`로 띄우고 `--character-set-server=utf8mb4`를 준다.
+성능 관련 파라미터(3.10)는 건드리지 않는다.
+
+헬스체크는 `mysqladmin ping -h 127.0.0.1`로 TCP 리스너를 확인한다.
+소켓이 아니라 TCP로 확인해야 앱이 붙을 수 있는 상태인지가 검증된다.
+
+데이터는 named volume `mysql-data`에 두고, 초기화는 `docker compose down -v`로 한다.
 
 Kafka는 KRaft 단일 노드로 `KAFKA_NODE_ID`, `KAFKA_PROCESS_ROLES=broker,controller`,
 리스너 3종(`KAFKA_LISTENERS`, `KAFKA_ADVERTISED_LISTENERS`,
 `KAFKA_LISTENER_SECURITY_PROTOCOL_MAP`), `KAFKA_CONTROLLER_QUORUM_VOTERS`,
 `KAFKA_CONTROLLER_LISTENER_NAMES`, 복제계수 1을 설정한다.
 
-### 5.6 테스트
+### 6.6 `.gitignore`
+
+`build/`, `.gradle/`, `.idea/`, `out/`, `*.log`.
+`gradle/wrapper/gradle-wrapper.jar`와 `gradlew`는 **커밋한다** — wrapper의 존재 이유다.
+
+### 6.7 테스트
 
 `CouponApplicationTests`: `@SpringBootTest` + `@Testcontainers`,
-`@ServiceConnection`을 붙인 `PostgreSQLContainer<>("postgres:17-alpine")` 정적 컨테이너,
-`contextLoads()` 빈 테스트 메서드 하나.
+`@ServiceConnection`을 붙인 `MySQLContainer<>("mysql:8.4")` 정적 컨테이너,
+`contextLoads()` 메서드 하나.
 
 assert가 없어도 의미가 있다. 이 테스트는 **로컬 DB 상태와 무관하게
 Flyway 스키마와 JPA 엔티티 매핑이 일치한다**는 것을 증명한다.
@@ -290,12 +392,7 @@ Flyway 스키마와 JPA 엔티티 매핑이 일치한다**는 것을 증명한�
 
 동시성 테스트는 Phase 1의 작업이다.
 
-### 5.7 `.gitignore`
-
-`build/`, `.gradle/`, `.idea/`, `*.log`, `out/`.
-`gradle/wrapper/gradle-wrapper.jar`와 `gradlew`는 **커밋한다** — wrapper의 존재 이유다.
-
-### 5.8 문서 초기화
+### 6.8 문서 초기화
 
 **`docs/progress.md`** — 최상단에 현재 단계를 기록한다.
 
@@ -304,15 +401,27 @@ Flyway 스키마와 JPA 엔티티 매핑이 일치한다**는 것을 증명한�
 ```
 
 Phase별 완료 조건과 체크 상태를 함께 둔다.
+CLAUDE.md가 요구하는 "현재 단계" 갱신 지점이 이 파일이다.
 
-**`docs/benchmark.md`** — CLAUDE.md에 정의된 표 헤더와 측정 조건 기록 양식만 만든다.
-수치는 Phase 1에서 채운다. 조건이 다른 수치를 비교하지 않기 위해
-행마다 VU 수 / duration / 쿠폰 수량 / 커넥션 풀 크기를 함께 적는다.
+**`docs/benchmark.md`** — CLAUDE.md에 정의된 표 헤더와 측정 조건 양식만 만든다.
+수치는 Phase 1에서 채운다.
 
 | Phase | 방식 | TPS | p95 | p99 | 오버셀 | 비고 |
 |-------|------|-----|-----|-----|--------|------|
 
-### 5.9 에러 처리
+측정 조건 양식에 아래를 고정 항목으로 둔다.
+
+- k6 VU 수, duration, 쿠폰 총 수량
+- HikariCP `maximum-pool-size`
+- `innodb_flush_log_at_trx_commit`, `innodb_buffer_pool_size`
+- 하드웨어: AMD Ryzen 5 5600X (6C/12T), 16GB RAM, Windows 10 Pro, Docker Desktop
+
+**한 가지 정직하게 적어둘 것:** 앱, MySQL 컨테이너, k6가 모두 같은 머신에서 돈다.
+k6가 CPU를 쓰면 그만큼 앱과 DB가 못 쓴다.
+따라서 **절대 수치는 의미가 없고 Phase 간 상대 비교만 유효하다.**
+이 한계를 `docs/benchmark.md` 상단에 명시한다.
+
+### 6.9 에러 처리
 
 **Phase 0에는 없다.** 전역 예외 핸들러, 커스텀 예외, 요청 검증을 만들지 않는다.
 처리할 요청이 아직 없다.
@@ -321,38 +430,46 @@ Phase별 완료 조건과 체크 상태를 함께 둔다.
 DB가 없을 때 Flyway/Hibernate가 부팅을 실패시키는 것도 의도된 동작이다.
 `try-catch`로 감싸 부팅을 통과시키지 않는다.
 
-## 6. 검증 절차 (Phase 0 완료 조건)
+## 7. git / 원격 저장소
+
+- 원격: `origin` = `https://github.com/youngmin0628/port_1.git` (확인 시점에 빈 저장소)
+- 기본 브랜치: `main`
+- Phase 단위로 커밋하고 Phase 완료 시 push한다
+
+## 8. 검증 절차 (Phase 0 완료 조건)
 
 순서대로 전부 통과해야 Phase 1로 넘어간다.
 
-1. `docker compose up -d` → `postgres`만 기동되고 healthy 상태가 된다
+0. Docker Desktop 기동 (확인 시점에 꺼져 있었다). `docker info`가 응답할 것.
+1. `docker compose up -d` → `mysql`만 기동되고 healthy 상태가 된다
    (`docker compose ps`로 확인). Redis/Kafka는 기동되지 않는다.
-2. `./gradlew bootRun` → Flyway가 `V1__init` 을 적용하고,
+2. `./gradlew bootRun` → Flyway가 `V1__init`을 적용하고,
    Hibernate `validate`가 통과하고, 앱이 8080에서 기동된다.
 3. `curl localhost:8080/actuator/health` → HTTP 200, `status: UP`,
    `components.db.status: UP`.
-4. `./gradlew test` → Testcontainers PostgreSQL 위에서 컨텍스트 로드 테스트 통과.
+4. `./gradlew test` → Testcontainers MySQL 위에서 컨텍스트 로드 테스트 통과.
 5. compose YAML 스모크 체크(1회):
    `docker compose --profile redis --profile kafka up -d` → redis/kafka 모두 기동 확인
    → `docker compose --profile redis --profile kafka down`.
    Phase 3/4에서 처음 삽을 파지 않기 위한 확인이다.
-6. `git init` 후 최초 커밋 완료.
+6. `origin`에 push 완료.
 
-## 7. 리스크
+## 9. 리스크
 
 | 리스크 | 영향 | 대응 |
 |---|---|---|
-| 첫 빌드에 네트워크 필요 (JDK 21 자동 확보, 의존성, `start.spring.io`) | 셋업 차단 | 실패 시 Gradle 배포 zip 직접 내려받아 wrapper 생성 |
-| k6 미설치 | Phase 1의 부하 측정 차단 (Phase 0은 무관) | Phase 1 진입 시 `winget install k6` 안내 |
-| `flyway-database-postgresql` 아티팩트명/버전 | 빌드 실패 | 구현 시 Spring Boot BOM 기준으로 확인 |
+| 첫 빌드에 네트워크 필요 (JDK 21 자동 확보, 의존성, `start.spring.io`) | 셋업 차단 | 실패 시 Gradle 배포 zip을 직접 내려받아 wrapper 생성 |
+| `caching_sha2_password` 인증 실패 | 앱이 DB에 붙지 못함 | 발생 시 JDBC URL에 `allowPublicKeyRetrieval=true` 추가. MySQL 8.4 + connector-j 조합에서 흔한 첫 관문이다 |
+| `flyway-mysql` 아티팩트명/버전 | 빌드 실패 | 구현 시 Spring Boot BOM 기준으로 확인 |
 | Kafka KRaft 환경변수 오타 | Phase 4에서 발견 | 검증 절차 5번으로 Phase 0에 앞당겨 확인 |
+| k6 미설치 | Phase 1의 부하 측정 차단 (Phase 0은 무관) | Phase 1 진입 시 `winget install k6` |
 
-## 8. 다음 Phase로 넘기는 항목
+## 10. 다음 Phase로 넘기는 항목
 
 - **Phase 1**: 리포지토리, 발급 서비스/컨트롤러, 동시성 테스트, k6 스크립트, 오버셀 재현 수치
-- **Phase 2**: `lock_timeout` 설정, `(coupon_id, user_id)` unique 제약,
-  `@Version` 컬럼, 락 구현체 3종
+- **Phase 2**: `innodb_lock_wait_timeout` 조정, `(coupon_id, user_id)` unique 제약,
+  `@Version` 컬럼, 락 구현체 3종, gap lock 데드락 관찰 및 기록
 - **Phase 3**: Redis 의존성 및 Lua 스크립트, `docker compose --profile redis`
 - **Phase 4**: Kafka 의존성 및 프로듀서/컨슈머, `docker compose --profile kafka`,
-  ID 생성 전략을 pooled 시퀀스로 전환할지 측정 후 판단
+  ID 생성 전략 전환 여부를 측정 후 판단
 - **Phase 5 또는 k8s 이행 시점**: 앱 Dockerfile, k8s 매니페스트
