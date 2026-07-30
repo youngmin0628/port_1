@@ -1,6 +1,6 @@
 # 진행 상황
 
-현재 단계: **Phase 2 — DB 락으로 해결 (비교군)**
+현재 단계: **Phase 3 — Redis 원자 연산**
 
 Phase 완료 조건을 만족하지 못하면 다음으로 넘어가지 않는다.
 
@@ -28,21 +28,26 @@ Phase 완료 조건을 만족하지 못하면 다음으로 넘어가지 않는�
 
 **`CouponIssueConcurrencyTest`와 `CouponIssueConcurrencyLargePoolTest`는
 실패하는 것이 정상이다.** Phase 1의 산출물이 통과하는 테스트가 아니라
-실패한 수치이기 때문이다. Phase 2에서 통과로 바뀐다.
-`gradlew test`는 Phase 2 완료 전까지 빨간불이다 — 실패 2건, 통과 7건.
+실패한 수치이기 때문이다. 락을 건 구현은 Phase 2에서 통과한다.
 
 ## Phase 2 — DB 락으로 해결 (비교군)
 
-- [ ] 비관적 락 (`SELECT ... FOR UPDATE`)
-- [ ] 낙관적 락 (`@Version` + 재시도)
-- [ ] DB unique 제약 (`coupon_id` + `user_id`)
-- [ ] 세 방식 각각 동시성 테스트 통과 + k6 측정
-- [ ] `innodb_lock_wait_timeout` 조정 후 측정 조건에 기록
-- [ ] gap lock 데드락 관찰 (`SHOW ENGINE INNODB STATUS`의 LATEST DETECTED DEADLOCK)
-- [ ] 트레이드오프 표 (정합성/성능/구현복잡도/한계)
+- [x] 비관적 락 (`SELECT ... FOR UPDATE`) — TPS 218, 오버셀 0건
+- [x] 낙관적 락 (`@Version` + 재시도) — TPS 114, 오버셀 0건, 재시도 808회
+- [x] DB unique 제약 (`coupon_id` + `user_id`) — 중복 발급 109건 → 1건
+- [x] 세 방식 각각 동시성 테스트 + k6 측정
+- [x] gap lock 데드락 관찰 (`docs/known-issues.md`)
+- [x] 트레이드오프 표 (`docs/benchmark.md`)
 
-완료 조건: 오버셀 0건, TPS는 Phase 1보다 떨어져 있을 것.
-떨어지지 않았으면 부하가 부족한 것이다.
+완료 조건: 오버셀 0건, TPS는 Phase 1보다 떨어져 있을 것. **충족.**
+나이브 819 → 비관적 218(-73%) → 낙관적 114(-86%).
+
+`innodb_lock_wait_timeout`은 기본값 50초를 유지했다. 커넥션 풀이 10이라
+대기 큐가 짧아 조정할 필요가 없었다. 락 대기 타임아웃은 한 번도 발생하지 않았다.
+
+**`NaiveStockRaceTest`와 `NaiveStockRaceLargePoolTest`는 계속 실패한다.**
+Phase 1의 오버셀 재현이 목적인 테스트라 의도된 상태다.
+`gradlew test`는 실패 2건 / 통과 12건이다.
 
 ## Phase 3 — Redis 원자 연산
 
