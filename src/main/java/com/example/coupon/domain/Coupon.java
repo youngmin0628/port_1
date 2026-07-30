@@ -21,4 +21,17 @@ public class Coupon {
 
 	protected Coupon() {
 	}
+
+	public Coupon(String name, int totalQuantity) {
+		this.name = name;
+		this.totalQuantity = totalQuantity;
+	}
+
+	public Long getId() {
+		return id;
+	}
+
+	public int getTotalQuantity() {
+		return totalQuantity;
+	}
 }

@@ -26,4 +26,11 @@ public class CouponIssue {
 
 	protected CouponIssue() {
 	}
+
+	// issuedAt을 인자로 받는다. 엔티티가 직접 now()를 부르면 시간을 통제할 수 없다.
+	public CouponIssue(Long couponId, Long userId, LocalDateTime issuedAt) {
+		this.couponId = couponId;
+		this.userId = userId;
+		this.issuedAt = issuedAt;
+	}
 }
