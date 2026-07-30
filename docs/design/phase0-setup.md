@@ -1,7 +1,6 @@
 # Phase 0 — 프로젝트 셋업 설계
 
 작성일: 2026-07-30
-상태: 승인됨
 
 ## 1. 목표
 
@@ -82,7 +81,7 @@ PostgreSQL을 한 번 검토했다가 MySQL로 되돌렸다.
 
 ### 3.3 Java 21 — Gradle toolchain으로 확보
 
-로컬 JDK는 24지만 CLAUDE.md 스택은 21이다.
+로컬 JDK는 24지만 이 프로젝트가 정한 스택은 21이다.
 `build.gradle`에 toolchain 21을 선언하고 `settings.gradle`에 foojay-resolver 플러그인을 붙여
 로컬에 21이 없으면 Gradle이 첫 빌드에 받아오게 한다.
 
@@ -194,7 +193,7 @@ long issued = couponIssueRepository.countByCouponId(couponId);
 - 섹션 구분 주석(`// ===== 필드 =====`)과 장식용 구분선
 - 이모지, 체크마크, 화살표 같은 장식 문자
 - `// TODO`, `// FIXME`. 남길 것이 있으면 `docs/known-issues.md`에 문장으로 쓴다
-- 발생 불가능한 시나리오의 null 체크와 try-catch (CLAUDE.md 4번)
+- 발생 불가능한 시나리오의 null 체크와 try-catch
 
 ### 4.3 이름
 
@@ -207,9 +206,9 @@ long issued = couponIssueRepository.countByCouponId(couponId);
 한국어로 쓴다. 제목은 무엇을 했는지 한 줄.
 본문은 그 이유가 코드나 제목에서 자명하지 않을 때만 쓰고, 불릿을 기계적으로 나열하지 않는다.
 
-`Co-Authored-By: Claude` 트레일러는 유지한다.
-도구를 썼다는 사실을 이력에서 지우는 것과 코드가 사람 손을 거친 것처럼 보이게 하는 것은
-다른 문제다. 앞의 것은 하지 않는다.
+커밋 하나가 하나의 변경을 담게 한다. 여러 관심사를 한 커밋에 섞으면
+나중에 "이 결정을 왜 했더라"를 히스토리에서 되짚을 수 없다.
+이 프로젝트에서 커밋 히스토리는 그 자체가 기록물이다.
 
 ### 4.5 문서
 
@@ -226,11 +225,10 @@ portfolioPjt/
 ├── gradlew, gradlew.bat, gradle/wrapper/
 ├── docker-compose.yml
 ├── .gitignore
-├── CLAUDE.md, PROMPTS.md            (기존)
 ├── docs/
 │   ├── progress.md                  (신규)
 │   ├── benchmark.md                 (신규, 표 헤더와 측정 조건 양식만)
-│   └── superpowers/specs/           (이 문서)
+│   └── design/                      (이 문서)
 └── src/
     ├── main/java/com/example/coupon/
     │   ├── CouponApplication.java
@@ -401,9 +399,9 @@ Flyway 스키마와 JPA 엔티티 매핑이 일치한다**는 것을 증명한�
 ```
 
 Phase별 완료 조건과 체크 상태를 함께 둔다.
-CLAUDE.md가 요구하는 "현재 단계" 갱신 지점이 이 파일이다.
+Phase가 바뀔 때마다 최상단 줄을 갱신한다. 빠뜨리면 다음 작업에서 단계를 앞질러 간다.
 
-**`docs/benchmark.md`** — CLAUDE.md에 정의된 표 헤더와 측정 조건 양식만 만든다.
+**`docs/benchmark.md`** — 아래 표 헤더와 측정 조건 양식만 만든다.
 수치는 Phase 1에서 채운다.
 
 | Phase | 방식 | TPS | p95 | p99 | 오버셀 | 비고 |

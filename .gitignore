@@ -37,3 +37,9 @@ out/
 .vscode/
 
 *.log
+
+### 작업 메모 (저장소에 올리지 않음) ###
+CLAUDE.md
+PROMPTS.md
+docs/superpowers/
+interview-notes.md
