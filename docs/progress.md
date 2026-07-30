@@ -1,6 +1,6 @@
 # 진행 상황
 
-현재 단계: **Phase 1 — 나이브 구현 + 실패 재현**
+현재 단계: **Phase 2 — DB 락으로 해결 (비교군)**
 
 Phase 완료 조건을 만족하지 못하면 다음으로 넘어가지 않는다.
 
@@ -19,14 +19,17 @@ Phase 완료 조건을 만족하지 못하면 다음으로 넘어가지 않는�
 
 ## Phase 1 — 나이브 구현 + 실패 재현
 
-- [ ] `count()` 기반 무락 발급 로직
-- [ ] 1000 스레드 동시성 테스트에서 오버셀 재현 (`ExecutorService` + `CountDownLatch`)
-- [ ] 실제 발급 건수를 `docs/benchmark.md`에 기록
-- [ ] k6 부하 테스트로 TPS, p95, p99 측정
+- [x] `count()` 기반 무락 발급 로직
+- [x] 1000 스레드 동시성 테스트에서 오버셀 재현 (`ExecutorService` + `CountDownLatch`)
+- [x] 실제 발급 건수를 `docs/benchmark.md`에 기록 (풀 10 → 107건, 풀 50 → 126건)
+- [x] k6 부하 테스트로 TPS, p95, p99 측정 (939 / 268ms / 452ms)
 
-완료 조건: 오버셀이 실제로 발생하고 그 수치가 문서에 남아 있을 것.
+완료 조건: 오버셀이 실제로 발생하고 그 수치가 문서에 남아 있을 것. 충족.
 
-시작 전 준비물: k6가 로컬에 없다. `winget install k6`.
+**`CouponIssueConcurrencyTest`와 `CouponIssueConcurrencyLargePoolTest`는
+실패하는 것이 정상이다.** Phase 1의 산출물이 통과하는 테스트가 아니라
+실패한 수치이기 때문이다. Phase 2에서 통과로 바뀐다.
+`gradlew test`는 Phase 2 완료 전까지 빨간불이다 — 실패 2건, 통과 7건.
 
 ## Phase 2 — DB 락으로 해결 (비교군)
 
