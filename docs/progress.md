@@ -1,6 +1,6 @@
 # 진행 상황
 
-현재 단계: **Phase 3 — Redis 원자 연산**
+현재 단계: **Phase 4 — Kafka 비동기화**
 
 Phase 완료 조건을 만족하지 못하면 다음으로 넘어가지 않는다.
 
@@ -22,7 +22,7 @@ Phase 4까지의 수치가 이 프로젝트의 알맹이고, 서비스를 쪼갤
 | 나이브 | 1 | +7건 | 939 |
 | DB 락 (비관적) | 2 | 0건 | 218 |
 | DB 락 (낙관적) | 2 | 0건 | 114 |
-| Redis | 3 | 미측정 | 미측정 |
+| Redis | 3 | 0건 | 912 |
 | Kafka | 4 | 미측정 | 미측정 |
 
 이 표는 `docs/benchmark.md`의 요약이다. 원본과 어긋나면 `benchmark.md`가 맞다.
@@ -49,7 +49,7 @@ Phase 4까지의 수치가 이 프로젝트의 알맹이고, 서비스를 쪼갤
 
 완료 조건: 오버셀이 실제로 발생하고 그 수치가 문서에 남아 있을 것. 충족.
 
-**`CouponIssueConcurrencyTest`와 `CouponIssueConcurrencyLargePoolTest`는
+**`NaiveStockRaceTest`와 `NaiveStockRaceLargePoolTest`는
 실패하는 것이 정상이다.** Phase 1의 산출물이 통과하는 테스트가 아니라
 실패한 수치이기 때문이다. 락을 건 구현은 Phase 2에서 통과한다.
 
@@ -70,16 +70,18 @@ Phase 4까지의 수치가 이 프로젝트의 알맹이고, 서비스를 쪼갤
 
 **`NaiveStockRaceTest`와 `NaiveStockRaceLargePoolTest`는 계속 실패한다.**
 Phase 1의 오버셀 재현이 목적인 테스트라 의도된 상태다.
-`gradlew test`는 실패 2건 / 통과 12건이다.
+`gradlew test`는 실패 2건 / 통과 15건이다(Phase 3 기준, 총 17건).
 
 ## Phase 3 — Redis 원자 연산
 
-- [ ] Lua 스크립트로 재고 차감 + 중복 발급 방지를 단일 원자 연산으로
-- [ ] `INCR` 후 초과분 롤백 방식과의 차이 및 선택 이유 문서화
-- [ ] Redis 성공 직후 앱이 죽는 경우의 정합성 취약점을 `docs/known-issues.md`에 기록
-- [ ] Redisson 분산락과 성능 비교 (선택)
+- [x] Lua 스크립트로 재고 차감 + 중복 발급 방지를 단일 원자 연산으로
+- [x] `INCR` 후 초과분 롤백 방식과의 차이 및 선택 이유 문서화 (`docs/design/phase3-redis.md` 2.1절)
+- [x] Redis 성공 직후 앱이 죽는 경우의 정합성 취약점을 `docs/known-issues.md`에 기록
+- [ ] Redisson 분산락과 성능 비교 — 선택 과제, 프로젝트 완료 조건에 없어 미실시
 
-완료 조건: 오버셀 0건 + Phase 2 대비 TPS 개선 수치.
+완료 조건: 오버셀 0건 + Phase 2 대비 TPS 개선 수치. **충족.**
+TPS 912로 비관적 락(218)의 4.2배이고, 나이브(819)보다도 빠르다.
+중복 발급은 예외 0건으로 걸러 DB까지 가지 않는다.
 
 ## Phase 4 — Kafka 비동기화
 
