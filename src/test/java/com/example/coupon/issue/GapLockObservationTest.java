@@ -4,7 +4,7 @@ import com.example.coupon.domain.Coupon;
 import com.example.coupon.domain.CouponIssue;
 import com.example.coupon.domain.CouponIssueRepository;
 import com.example.coupon.domain.CouponRepository;
-import com.example.coupon.support.MySqlTestBase;
+import com.example.coupon.support.ContainerTestBase;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -26,7 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 // 쿠폰 행을 PK로 잠그는 비관적 락에는 이 문제가 없다. 단일 행 락이라 gap이 없다.
 @SpringBootTest
 @ActiveProfiles("naive")
-class GapLockObservationTest extends MySqlTestBase {
+class GapLockObservationTest extends ContainerTestBase {
 
 	private static final int THREAD_COUNT = 8;
 

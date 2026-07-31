@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.coupon.domain.Coupon;
 import com.example.coupon.domain.CouponIssueRepository;
 import com.example.coupon.domain.CouponRepository;
-import com.example.coupon.support.MySqlTestBase;
+import com.example.coupon.support.ContainerTestBase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,7 +14,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
 @ActiveProfiles("naive")
-class NaiveCouponIssuerTest extends MySqlTestBase {
+class NaiveCouponIssuerTest extends ContainerTestBase {
 
 	@Autowired
 	private CouponIssuer couponIssuer;

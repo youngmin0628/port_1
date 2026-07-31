@@ -2,7 +2,7 @@ package com.example.coupon;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.coupon.support.MySqlTestBase;
+import com.example.coupon.support.ContainerTestBase;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +15,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("naive")
-class CouponApplicationTests extends MySqlTestBase {
+class CouponApplicationTests extends ContainerTestBase {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;

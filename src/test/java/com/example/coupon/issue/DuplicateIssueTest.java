@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.coupon.domain.Coupon;
 import com.example.coupon.domain.CouponIssueRepository;
 import com.example.coupon.domain.CouponRepository;
-import com.example.coupon.support.MySqlTestBase;
+import com.example.coupon.support.ContainerTestBase;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -18,7 +18,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
 @ActiveProfiles("naive")
-class DuplicateIssueTest extends MySqlTestBase {
+class DuplicateIssueTest extends ContainerTestBase {
 
 	private static final int TOTAL_QUANTITY = 100;
 	private static final int THREAD_COUNT = 1000;

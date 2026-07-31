@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.coupon.domain.Coupon;
 import com.example.coupon.domain.CouponIssueRepository;
 import com.example.coupon.domain.CouponRepository;
-import com.example.coupon.support.MySqlTestBase;
+import com.example.coupon.support.ContainerTestBase;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,7 +18,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("naive")
-class CouponIssueControllerTest extends MySqlTestBase {
+class CouponIssueControllerTest extends ContainerTestBase {
 
 	@Autowired
 	private TestRestTemplate restTemplate;

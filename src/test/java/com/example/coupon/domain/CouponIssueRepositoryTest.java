@@ -2,7 +2,7 @@ package com.example.coupon.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.coupon.support.MySqlTestBase;
+import com.example.coupon.support.ContainerTestBase;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,7 +12,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
 @ActiveProfiles("naive")
-class CouponIssueRepositoryTest extends MySqlTestBase {
+class CouponIssueRepositoryTest extends ContainerTestBase {
 
 	@Autowired
 	private CouponRepository couponRepository;
